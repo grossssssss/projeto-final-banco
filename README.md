@@ -1,58 +1,118 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Sistema de Gestão Comercial — Laravel & PostgreSQL (Neon)
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Aplicação web e API REST para gerenciamento comercial (**Clientes**, **Produtos**, **Pedidos** e **Auditoria de Preços**), desenvolvida para integrar os conceitos das disciplinas de **Banco de Dados II** e **Desenvolvimento Back-end**.
 
-## About Laravel
+---
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Tecnologias Utilizadas
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+* **Back-end:** PHP 8.x, Laravel 11/12 (Arquitetura MVC + Camada de Services)
+* **Banco de Dados:** PostgreSQL (hospedado em nuvem via **Neon**)
+* **Front-end:** Blade Templates + Bootstrap 5 (CDN)
+* **Versionamento:** Git & GitHub
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+---
 
-## Learning Laravel
+## Arquitetura do Projeto
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+A aplicação separa a camada de apresentação (Controllers Web e API) das regras de negócio e chamadas ao banco de dados por meio da camada de **Services**:
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```text
+├── app/
+│   ├── Http/Controllers/
+│   │   ├── Api/               # Endpoints REST (respostas em JSON)
+│   │   └── Web/               # Controladores das interfaces Blade
+│   ├── Models/                # Eloquent Models e relacionamentos
+│   └── Services/              # Regras de negócio e chamadas a Procedures/Functions
+├── database/
+│   ├── migrations/            # Estrutura relacional das tabelas
+│   └── sql/
+│       └── objetos_banco.sql  # Script com Índices, Functions, Procedures e Triggers
+├── resources/views/           # Templates Blade (Layouts, Clientes, Produtos, Pedidos)
+└── routes/
+    ├── web.php                # Rotas da interface web
+    └── api.php                # Rotas da API REST (/api/...)
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+---
 
-## Contributing
+## Estrutura e Objetos de Banco de Dados (`database/sql/objetos_banco.sql`)
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+Além das tabelas relacionais (`clientes`, `produtos`, `pedidos`, `pedido_itens` e `auditoria_precos`), o projeto implementa regras críticas diretamente no PostgreSQL:
 
-## Code of Conduct
+### 1. Índices (Otimização de Consultas)
+* **`idx_produtos_categoria`:** Índice simples na coluna `categoria` da tabela `produtos` para acelerar filtros e reajustes em lote.
+* **`idx_pedidos_status_data`:** Índice composto nas colunas `(status, data_pedido)` da tabela `pedidos` para otimizar relatórios e listagens filtradas por situação e período.
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+### 2. Functions (Cálculos Reutilizáveis)
+* **`fn_calcular_total_pedido(p_pedido_id)`:** Soma `quantidade * preco_unitario` de todos os itens vinculados a um pedido específico.
+* **`fn_total_gasto_cliente(p_cliente_id)`:** Retorna o montante total gasto por um cliente considerando apenas pedidos com status `'concluido'`.
 
-## Security Vulnerabilities
+### 3. Stored Procedures (Operações Transacionais)
+* **`sp_finalizar_pedido(p_pedido_id)`:** Valida se o pedido possui itens (`valor_total > 0`), recalcula o total e altera o status para `'concluido'`.
+* **`sp_reajustar_preco_categoria(p_categoria, p_percentual)`:** Aplica reajuste percentual em lote nos preços de todos os produtos de uma categoria, disparando automaticamente a auditoria de preços.
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+### 4. Triggers (Automação e Integridade)
+* **`trg_atualizar_estoque_pedido_item` (`fn_trg_gerenciar_estoque`):** Executada `AFTER INSERT OR DELETE` em `pedido_itens`. Valida disponibilidade em estoque, realiza baixa na inserção ou estorno na remoção e atualiza `pedidos.valor_total` via `fn_calcular_total_pedido`.
+* **`trg_auditar_preco_produto` (`fn_trg_auditar_preco`):** Executada `AFTER UPDATE OF preco` em `produtos`. Registra automaticamente na tabela `auditoria_precos` o valor anterior, o novo valor e a data/hora da alteração.
 
-## License
+---
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Como Executar o Projeto Localmente
+
+### 1. Clonar o repositório e instalar dependências
+```bash
+git clone <URL_DO_SEU_REPOSITORIO>
+cd projeto-final-banco
+composer install
+```
+
+### 2. Configurar variáveis de ambiente
+Copie o arquivo `.env.example` para `.env`, gere a chave da aplicação e configure a conexão com o PostgreSQL (Neon):
+```bash
+cp .env.example .env
+php artisan key:generate
+```
+
+No arquivo `.env`, preencha as credenciais do seu banco Neon:
+```env
+DB_CONNECTION=pgsql
+DB_HOST=seu-endpoint.neon.tech
+DB_PORT=5432
+DB_DATABASE=neondb
+DB_USERNAME=seu_usuario
+DB_PASSWORD=sua_senha
+DB_SSLMODE=require
+```
+
+### 3. Criar tabelas e objetos avançados no banco
+Execute as migrations do Laravel:
+```bash
+php artisan migrate
+```
+Em seguida, copie o conteúdo de **`database/sql/objetos_banco.sql`** e execute-o no **SQL Editor** do painel do Neon (ou via `psql`) para criar os índices, functions, procedures e triggers.
+
+### 4. Iniciar o servidor
+```bash
+php artisan serve
+```
+* **Interface Web:** `http://127.0.0.1:8000`
+* **Base da API REST:** `http://127.0.0.1:8000/api`
+
+---
+
+## Principais Endpoints da API REST
+
+| Método | Endpoint | Descrição |
+| :--- | :--- | :--- |
+| `GET` / `POST` | `/api/clientes` | Lista clientes ou cadastra um novo |
+| `GET` | `/api/clientes/{id}` | Detalhes do cliente + total gasto (`fn_total_gasto_cliente`) |
+| `PUT` / `DELETE` | `/api/clientes/{id}` | Atualiza ou remove um cliente |
+| `GET` / `POST` | `/api/produtos` | Lista produtos ou cadastra um novo |
+| `GET` | `/api/produtos/{id}` | Detalhes do produto + histórico de auditoria (`trg_auditar_preco_produto`) |
+| `PUT` / `DELETE` | `/api/produtos/{id}` | Atualiza (dispara auditoria se alterar preço) ou remove produto |
+| `POST` | `/api/produtos/reajustar` | Reajusta preços por categoria (`sp_reajustar_preco_categoria`) |
+| `GET` / `POST` | `/api/pedidos` | Lista pedidos ou abre um novo pedido |
+| `POST` | `/api/pedidos/{id}/itens` | Adiciona item (valida e baixa estoque via trigger) |
+| `DELETE` | `/api/pedidos/{id}/itens/{item}` | Remove item (estorna estoque e recalcula total via trigger) |
+| `POST` | `/api/pedidos/{id}/finalizar` | Conclui o pedido (`sp_finalizar_pedido`) |
